@@ -15,10 +15,15 @@ public class MatMul implements Runnable {
     public static final double MAXRAND = 1;
     public static final int MAXTHRDS = 8;
 
+    private static int n = 0;
+    private static int numthreads = 0;
+    private static double[] matrixA;
+    private static double[] matrixB;
+    private static double[] matrixC;
+    private static int[] breakPoints;
+
     public static void main(String[] args) {
         Scanner userInput = new Scanner(System.in);
-        int n = 0;
-        int numthreads = 0;
         try {
             System.out.printf("Enter size of n: ");
             n = userInput.nextInt();
@@ -34,26 +39,23 @@ public class MatMul implements Runnable {
         numthreads = numthreads < MAXTHRDS ? numthreads : MAXTHRDS; //caps # threads spawned
         n = n > numthreads ? n : numthreads; //ensures at least 1 row per thread
 
-        int array_size = n * n;
-        double matrixA[] = new double[array_size];
-        double matrixB[] = new double[array_size];
-        double matrixC[] = new double[array_size];
-        int breakPoints[] = new int[numthreads + 1];
+        int matrix_size = n * n;
+        matrixA = allocateMatrix(matrix_size, 1);
+        matrixB = allocateMatrix(matrix_size, 1);
+        matrixC = allocateMatrix(matrix_size, 0);
+        breakPoints = calcBreakpoints(n, numthreads);
         Thread thread_handles[] = new Thread[numthreads];
-
-        for(int i = 0; i < array_size; i++)
-            //matrixA[i] = MINRAND + (MAXRAND - MINRAND) * Math.random();
-            matrixA[i] = 1.0;
-        for(int i = 0; i < array_size; i++)
-            //matrixB[i] = MINRAND + (MAXRAND - MINRAND) * Math.random();
-            matrixB[i] = 1.0;
-        for(int i = 0; i < array_size; i++)
-            matrixC[i] = 0.0;
 
         for(int i = 0; i < numthreads; i++)
             thread_handles[i] = new Thread();
         for(int i = 0; i < numthreads; i++)
             thread_handles[i].start();
+        for(int i = 0; i < numthreads; i++)
+            try {
+                thread_handles[i].join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
 
         if(n < 7) {
             printMatrix(matrixA, n, 'A');
@@ -63,6 +65,63 @@ public class MatMul implements Runnable {
     }
 
     public void run() {
+        int my_rank = (int) Thread.currentThread().getId();
+        int rowband_start = breakPoints[my_rank];
+        int rowband_end = breakPoints[my_rank + 1];
+        int startB, endB;
+
+        for(int count = 0; count < numthreads; count++) {
+            startB = breakPoints[(my_rank + count) % numthreads];
+            endB = breakPoints[(my_rank + count) % numthreads + 1];
+
+            for(int i = rowband_start; i < rowband_end; i++) {
+                for(int j = startB; j < endB; j++) {
+                    double temp = matrixA[i*n + j];
+                    for(int k = 0; k < n; k++)
+                        matrixC[i*n + k] += temp * matrixB[j*n + k];
+                }
+            }
+        }
+    }
+
+    public static double[] allocateMatrix(int n, int random) {
+        double[] matrix = new double[n];
+        switch (random) {
+            case 0:
+                for(int i = 0; i < n; i++)
+                    matrix[i] = 0.0;
+                break;
+            case 1:
+                for(int i = 0; i < n; i++)
+                    matrix[i] = MINRAND + (MAXRAND - MINRAND) * Math.random();
+                break;
+        }
+        return matrix;
+    }
+
+    public static int[] calcBreakpoints(int n, int threadcount) {
+        int rows = n / threadcount;
+        int remainder = n % threadcount; //number of rows not evenly distributed
+        int last_k = threadcount - remainder; //number of threads to get extra row
+
+        int[] breakpoints = allocateArray(threadcount + 1);
+
+        //row bands are attempted to be distributed evenly
+        for(int i = 1; i <= threadcount; i++)
+            breakpoints[i] += breakpoints[i-1] + rows;
+
+        //the remaining rows are given one to each of the last_k threads
+        for(int i = threadcount; i > last_k; i--)
+            breakpoints[i] += remainder--;
+
+        return breakpoints;
+    }
+
+    public static int[] allocateArray (int n) {
+        int[] array = new int[n];
+        for(int i = 0; i < n; i++)
+            array[i] = 0;
+        return array;
     }
 
     public static void printMatrix(double matrix[], int n, char m) {
